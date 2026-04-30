@@ -1,0 +1,5 @@
+Supervised learning trains models on labeled data to make predictions.
+Unsupervised learning finds patterns in unlabeled data.
+Reinforcement learning teaches agents through rewards and penalties.
+Feature engineering is the process of selecting relevant input variables.
+Model evaluation uses metrics like accuracy, precision, and recall.
