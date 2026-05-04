@@ -9,6 +9,7 @@ class Settings(BaseSettings):
     # API Keys
     anthropic_api_key: str
     openai_api_key: str
+    tavily_api_key: str
     
     # Database
     database_url: str

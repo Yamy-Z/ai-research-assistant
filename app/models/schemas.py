@@ -22,6 +22,7 @@ class Source(BaseModel):
     content: str
     metadata: dict
     score: float
+    source_type: str
 
 
 class QueryResponse(BaseModel):
