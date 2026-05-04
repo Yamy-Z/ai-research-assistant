@@ -1,7 +1,6 @@
 from anthropic import Anthropic
 from app.core.config import get_settings
-from app.services.embedding import EmbeddingService
-from app.services.vector_store import VectorStore
+from app.services.hybrid_search import HybridSearchService
 from app.services.web_search import WebSearchService
 from app.utils.logger import setup_logger
 from typing import List, Dict, Any
@@ -12,17 +11,15 @@ logger = setup_logger(__name__)
 
 
 class RAGService:
-    """Enhanced Retrieval-Augmented Generation service with web search."""
+    """Enhanced RAG service with hybrid search."""
     
     def __init__(
         self,
-        embedding_service: EmbeddingService,
-        vector_store: VectorStore,
+        hybrid_search_service: HybridSearchService,
         web_search_service: WebSearchService
     ):
-        self.embedding_service = embedding_service
-        self.vector_store = vector_store
-        self.web_search_service = web_search_service
+        self.hybrid_search = hybrid_search_service
+        self.web_search = web_search_service
         self.llm_client = Anthropic(api_key=settings.anthropic_api_key)
     
     def answer_query(
@@ -30,55 +27,52 @@ class RAGService:
         query: str,
         top_k: int = 5,
         use_web_search: bool = True,
-        web_results: int = 3
+        web_results: int = 3,
+        alpha: float = 0.7  # Weight for vector vs BM25
     ) -> Dict[str, Any]:
         """
-        Answer a query using RAG with optional web search.
+        Answer query using hybrid RAG.
         
         Args:
             query: User question
-            top_k: Number of documents to retrieve from vector DB
-            use_web_search: Whether to include web search results
-            web_results: Number of web results to include
+            top_k: Number of documents to retrieve
+            use_web_search: Include web search
+            web_results: Number of web results
+            alpha: Vector search weight (0.0-1.0)
         
         Returns:
             Dictionary with answer and sources
         """
         start_time = time.time()
         
-        logger.info(f"Processing query: {query}")
+        logger.info(f"Processing query with hybrid search: {query}")
         
-        # 1. Retrieve from vector database
-        query_embedding = self.embedding_service.embed_text(query)
-        vector_results = self.vector_store.search(
-            query_vector=query_embedding,
-            limit=top_k,
-            score_threshold=0.5
+        # 1. Hybrid search (vector + BM25)
+        hybrid_results = self.hybrid_search.search(
+            query=query,
+            top_k=top_k,
+            alpha=alpha
         )
         
         all_sources = []
         
-        # Add vector DB results
-        for result in vector_results:
+        # Add hybrid results
+        for result in hybrid_results:
             all_sources.append({
-                "content": result["payload"]["content"],
+                "content": result["content"],
                 "score": result["score"],
                 "source_type": "document",
-                "metadata": {
-                    "filename": result["payload"]["filename"],
-                    "chunk_index": result["payload"]["chunk_index"]
-                }
+                "metadata": result["metadata"]
             })
         
         # 2. Web search if enabled
         if use_web_search:
             logger.info("Performing web search...")
-            web_results_list = self.web_search_service.search(
+            web_results_list = self.web_search.search(
                 query=query,
                 max_results=web_results
             )
             
-            # Add web results
             for result in web_results_list:
                 all_sources.append({
                     "content": result["content"],
@@ -90,39 +84,25 @@ class RAGService:
                     }
                 })
         
-        # 3. Generate answer if we have sources
+        # 3. Generate answer
         if not all_sources:
             return {
-                "answer": "I couldn't find any relevant information to answer your question.",
+                "answer": "I couldn't find relevant information.",
                 "sources": [],
-                "query_time_ms": (time.time() - start_time) * 1000,
-                "source_breakdown": {
-                    "documents": 0,
-                    "web": 0
-                }
+                "query_time_ms": (time.time() - start_time) * 1000
             }
         
-        # 4. Build context and generate answer
         context = self._build_context(all_sources)
         answer = self._generate_answer(query, context)
         
-        # 5. Calculate metrics
         query_time_ms = (time.time() - start_time) * 1000
-        source_breakdown = {
-            "documents": len([s for s in all_sources if s["source_type"] == "document"]),
-            "web": len([s for s in all_sources if s["source_type"] == "web"])
-        }
         
-        logger.info(
-            f"Query completed in {query_time_ms:.2f}ms "
-            f"(docs: {source_breakdown['documents']}, web: {source_breakdown['web']})"
-        )
+        logger.info(f"Query completed in {query_time_ms:.2f}ms")
         
         return {
             "answer": answer,
             "sources": all_sources,
-            "query_time_ms": query_time_ms,
-            "source_breakdown": source_breakdown
+            "query_time_ms": query_time_ms
         }
     
     def _build_context(self, sources: List[Dict]) -> str:
@@ -185,9 +165,8 @@ class RAGService:
 
 
 def get_rag_service(
-    embedding_service: EmbeddingService,
-    vector_store: VectorStore,
+    hybrid_search_service: HybridSearchService,
     web_search_service: WebSearchService
 ) -> RAGService:
     """Get RAG service dependency."""
-    return RAGService(embedding_service, vector_store, web_search_service)
+    return RAGService(hybrid_search_service, web_search_service)

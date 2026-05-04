@@ -5,12 +5,12 @@ from app.models.database import Query as QueryModel
 from app.models.schemas import QueryRequest, QueryResponse
 from app.services.embedding import get_embedding_service, EmbeddingService
 from app.services.vector_store import get_vector_store, VectorStore
+from app.services.bm25_search import get_bm25_service, BM25SearchService
+from app.services.hybrid_search import get_hybrid_search_service, HybridSearchService
 from app.services.web_search import get_web_search_service, WebSearchService
 from app.services.rag import get_rag_service, RAGService
-from app.utils.logger import setup_logger
 
 router = APIRouter(prefix="/query", tags=["query"])
-logger = setup_logger(__name__)
 
 
 @router.post("/", response_model=QueryResponse)
@@ -21,21 +21,21 @@ async def query(
     vector_store: VectorStore = Depends(get_vector_store),
     web_search_service: WebSearchService = Depends(get_web_search_service)
 ):
-    """
-    Answer a research query using RAG with web search.
+    """Answer research query using hybrid RAG."""
     
-    This endpoint:
-    1. Retrieves relevant documents from vector store
-    2. Searches the web for additional information
-    3. Combines and ranks all sources
-    4. Generates answer using Claude
-    5. Returns answer with citations
-    """
+    # Create BM25 service
+    bm25_service = get_bm25_service(db)
+    
+    # Create hybrid search service
+    hybrid_search_service = get_hybrid_search_service(
+        embedding_service,
+        vector_store,
+        bm25_service
+    )
     
     # Get RAG service
     rag_service = get_rag_service(
-        embedding_service,
-        vector_store,
+        hybrid_search_service,
         web_search_service
     )
     
@@ -43,8 +43,9 @@ async def query(
     result = rag_service.answer_query(
         query=request.query,
         top_k=request.top_k,
-        use_web_search=True,  # Enable by default
-        web_results=3
+        use_web_search=True,
+        web_results=3,
+        alpha=0.7  # 70% vector, 30% BM25
     )
     
     # Save query history
@@ -57,13 +58,11 @@ async def query(
     db.add(query_record)
     db.commit()
     
-    # Return response
     return QueryResponse(
         answer=result["answer"],
         sources=result["sources"] if request.include_sources else [],
         query_time_ms=result["query_time_ms"]
     )
-
 
 @router.get("/history")
 async def get_query_history(
