@@ -8,6 +8,9 @@ from app.models.database import Query as QueryModel
 from app.services.embedding import get_embedding_service
 from app.services.vector_store import get_vector_store
 from app.services.web_search import get_web_search_service
+from app.services.reranker import get_reranker_service
+from app.services.citation import get_citation_service
+from app.services.query_analyzer import get_query_analyzer
 from app.api.routes import query as query_route
 import pytest
 
@@ -23,6 +26,7 @@ class FakeRAGService:
         top_k: int = 5,
         use_web_search: bool = True,
         web_results: int = 3,
+        alpha: float = 0.7,
     ):
         return {
             "answer": f"Test answer for: {query}",
@@ -36,6 +40,11 @@ class FakeRAGService:
             ][:top_k],
             "query_time_ms": 12.5,
         }
+
+
+class FakeCitationService:
+    def extract_citations(self, answer, sources):
+        return {"citations": {}, "citation_count": 0}
 
 
 class FakeQueryResult:
@@ -84,11 +93,20 @@ def fake_dependencies(monkeypatch):
     app.dependency_overrides[get_embedding_service] = lambda: object()
     app.dependency_overrides[get_vector_store] = lambda: object()
     app.dependency_overrides[get_web_search_service] = lambda: object()
+    app.dependency_overrides[get_reranker_service] = lambda: object()
+    app.dependency_overrides[get_citation_service] = lambda: FakeCitationService()
+    app.dependency_overrides[get_query_analyzer] = lambda: object()
     monkeypatch.setattr(
         query_route,
         "get_rag_service",
-        lambda embedding_service, vector_store, web_search_service: FakeRAGService(),
+        lambda hybrid_search_service, web_search_service, query_analyzer: FakeRAGService(),
     )
+    monkeypatch.setattr(
+        query_route,
+        "get_hybrid_search_service",
+        lambda embedding_service, vector_store, bm25_service, reranker_service: object(),
+    )
+    monkeypatch.setattr(query_route, "get_bm25_service", lambda db: object())
 
     yield
 

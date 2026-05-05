@@ -1,69 +1,90 @@
 from app.services.embedding import EmbeddingService
 from app.services.vector_store import VectorStore
 from app.services.bm25_search import BM25SearchService
+from app.services.reranker import RerankerService
 from app.utils.logger import setup_logger
 from typing import List, Dict, Any
-import numpy as np
 
 logger = setup_logger(__name__)
 
 
 class HybridSearchService:
-    """Hybrid search combining vector and BM25 retrieval."""
+    """Hybrid search with re-ranking."""
     
     def __init__(
         self,
         embedding_service: EmbeddingService,
         vector_store: VectorStore,
-        bm25_service: BM25SearchService
+        bm25_service: BM25SearchService,
+        reranker_service: RerankerService
     ):
         self.embedding_service = embedding_service
         self.vector_store = vector_store
         self.bm25_service = bm25_service
+        self.reranker = reranker_service
     
     def search(
         self,
         query: str,
         top_k: int = 10,
-        alpha: float = 0.5
+        alpha: float = 0.5,
+        use_reranking: bool = True,
+        rerank_top_k: int = 20
     ) -> List[Dict[str, Any]]:
         """
-        Perform hybrid search combining vector and BM25.
+        Perform hybrid search with optional re-ranking.
         
         Args:
             query: Search query
-            top_k: Number of results to return
-            alpha: Weight for vector search (1-alpha for BM25)
-                   0.0 = pure BM25, 1.0 = pure vector
+            top_k: Final number of results
+            alpha: Vector search weight
+            use_reranking: Whether to apply re-ranking
+            rerank_top_k: Number of candidates for re-ranking
         
         Returns:
-            List of results sorted by combined score
+            List of results sorted by combined/reranked score
         """
-        logger.info(f"Hybrid search with alpha={alpha}")
+        logger.info(f"Hybrid search with reranking={use_reranking}")
         
-        # 1. Vector search
+        # 1. Get candidates (more than final top_k)
+        candidate_k = rerank_top_k if use_reranking else top_k
+        
+        # Vector search
         query_embedding = self.embedding_service.embed_text(query)
         vector_results = self.vector_store.search(
             query_vector=query_embedding,
-            limit=top_k * 2,  # Get more for fusion
-            score_threshold=0.0  # Get all results
+            limit=candidate_k * 2,
+            score_threshold=0.0
         )
         
-        # 2. BM25 search
+        # BM25 search
         bm25_results = self.bm25_service.search(
             query=query,
-            top_k=top_k * 2
+            top_k=candidate_k * 2
         )
         
-        # 3. Combine results using reciprocal rank fusion
+        # 2. Combine using RRF
         combined_results = self._reciprocal_rank_fusion(
             vector_results=vector_results,
             bm25_results=bm25_results,
             alpha=alpha
         )
         
-        # 4. Return top-k
-        return combined_results[:top_k]
+        # Take top candidates
+        candidates = combined_results[:candidate_k]
+        
+        # 3. Re-rank if enabled
+        if use_reranking and candidates:
+            logger.info(f"Re-ranking top {len(candidates)} candidates...")
+            final_results = self.reranker.rerank(
+                query=query,
+                results=candidates,
+                top_k=top_k
+            )
+        else:
+            final_results = candidates[:top_k]
+        
+        return final_results
     
     def _reciprocal_rank_fusion(
         self,
@@ -87,7 +108,7 @@ class HybridSearchService:
             rrf_score = alpha / (k + rank)
             
             if chunk_id not in doc_scores:
-                doc_scores[chunk_id] = 0
+                doc_scores[chunk_id] = 0.0
                 doc_data[chunk_id] = {
                     'content': result["payload"]["content"],
                     'document_id': result["payload"]["document_id"],
@@ -106,7 +127,7 @@ class HybridSearchService:
             rrf_score = (1 - alpha) / (k + rank)
             
             if chunk_id not in doc_scores:
-                doc_scores[chunk_id] = 0
+                doc_scores[chunk_id] = 0.0
                 doc_data[chunk_id] = {
                     'content': result["content"],
                     'document_id': result["document_id"],
@@ -154,11 +175,13 @@ class HybridSearchService:
 def get_hybrid_search_service(
     embedding_service: EmbeddingService,
     vector_store: VectorStore,
-    bm25_service: BM25SearchService
+    bm25_service: BM25SearchService,
+    reranker_service: RerankerService
 ) -> HybridSearchService:
     """Get hybrid search service dependency."""
     return HybridSearchService(
         embedding_service,
         vector_store,
-        bm25_service
+        bm25_service,
+        reranker_service
     )

@@ -7,6 +7,7 @@ from app.utils.logger import setup_logger
 from app.services.chunking import chunk_text
 from app.services.embedding import get_embedding_service, EmbeddingService
 from app.services.vector_store import get_vector_store, VectorStore
+from app.services.bm25_search import get_bm25_service, BM25SearchService
 import uuid
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -32,7 +33,8 @@ async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     embedding_service: EmbeddingService = Depends(get_embedding_service),
-    vector_store: VectorStore = Depends(get_vector_store)
+    vector_store: VectorStore = Depends(get_vector_store),
+    bm25_service: BM25SearchService = Depends(get_bm25_service)
 ):
     """Upload and process a document."""
     
@@ -80,6 +82,7 @@ async def upload_document(
     vector_store.add_vectors(embeddings, payloads)
     
     db.commit()
+    bm25_service.reindex()
     
     logger.info(
         f"Document {file.filename} uploaded: "
@@ -98,7 +101,8 @@ async def upload_document(
 async def delete_document(
     document_id: str,
     db: Session = Depends(get_db),
-    vector_store: VectorStore = Depends(get_vector_store)
+    vector_store: VectorStore = Depends(get_vector_store),
+    bm25_service: BM25SearchService = Depends(get_bm25_service)
 ):
     """Delete a document and its chunks."""
     # Delete from vector store
@@ -112,6 +116,7 @@ async def delete_document(
     # Delete document from DB
     result = db.query(Document).filter(Document.id == document_id).delete()
     db.commit()
+    bm25_service.reindex()
     
     if result == 0:
         raise HTTPException(status_code=404, detail="Document not found")

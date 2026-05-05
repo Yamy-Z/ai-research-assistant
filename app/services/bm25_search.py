@@ -1,11 +1,13 @@
 from rank_bm25 import BM25Okapi
+from fastapi import Depends
 from sqlalchemy.orm import Session
+from app.core.database import get_db
 from app.models.database import DocumentChunk
 from app.utils.logger import setup_logger
 from typing import List, Dict, Any
 import nltk
 from nltk.tokenize import word_tokenize
-import os
+import re
 
 logger = setup_logger(__name__)
 
@@ -70,7 +72,7 @@ class BM25SearchService:
             return tokens
         except Exception as e:
             logger.error(f"Tokenization error: {e}")
-            return text.lower().split()
+            return re.findall(r"\b[a-z0-9]{3,}\b", text.lower())
     
     def search(
         self,
@@ -126,6 +128,6 @@ class BM25SearchService:
         self._index_documents()
 
 
-def get_bm25_service(db: Session) -> BM25SearchService:
+def get_bm25_service(db: Session = Depends(get_db)) -> BM25SearchService:
     """Get BM25 search service dependency."""
     return BM25SearchService(db)
