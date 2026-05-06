@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+from app.agents.orchestrator import get_orchestrator, Orchestrator
 from app.core.database import get_db
 from app.models.database import Query as QueryModel
 from app.models.schemas import QueryRequest, QueryResponse
@@ -17,6 +18,29 @@ from app.services.query_analyzer import get_query_analyzer, QueryAnalyzer
 router = APIRouter(prefix="/query", tags=["query"])
 logger = setup_logger(__name__)
 
+
+@router.post("/orchestrator", response_model=QueryResponse)
+async def query_with_orchestrator(
+    request: QueryRequest,
+    orchestrator: Orchestrator = Depends(get_orchestrator)
+):
+    """
+    Answer query using multi-agent orchestrator.
+    
+    The orchestrator will:
+    1. Analyze the query
+    2. Route to appropriate agent(s)
+    3. Execute research and/or code
+    4. Aggregate results
+    """
+    
+    result = orchestrator.execute(request.query)
+    
+    return QueryResponse(
+        answer=result["answer"],
+        sources=result["sources"] if request.include_sources else [],
+        query_time_ms=result["execution_time_ms"]
+    )
 
 @router.post("/", response_model=QueryResponse)
 async def query(

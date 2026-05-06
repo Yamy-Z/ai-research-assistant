@@ -34,10 +34,19 @@ torch==2.1.2
 pypdf==4.0.1
 python-multipart==0.0.6
 
+# LangGraph for orchestration
+langgraph==0.0.40
+langchain-core==0.1.46
+langchain-anthropic==0.1.5
+
+# Docker SDK for code execution
+docker==7.0.0
+
 # Utilities
 python-dotenv==1.0.0
 httpx==0.26.0
 tenacity==8.2.3
+pydantic==2.5.3
 
 # Testing
 pytest==7.4.4
@@ -48,4 +57,4 @@ pytest-cov==4.1.0
 black==23.12.1
 ruff==0.1.11
 mypy==1.8.0
-requests
+requests<2.32

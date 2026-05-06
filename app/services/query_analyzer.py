@@ -43,8 +43,9 @@ class QueryAnalyzer:
                 max_tokens=1000,
                 messages=[{"role": "user", "content": prompt}]
             )
-            print(response.content[0].text)
+
             result = json.loads(response.content[0].text)
+            logger.info(f"Query Analyer Result: {result}")
             return result
             
         except Exception as e:
